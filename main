@@ -1,0 +1,253 @@
+import json
+import os
+
+class User:
+    def __init__(self, user_data):
+        self.id = user_data['id']
+        self.name = user_data['name']
+        self.email = user_data['email']
+        self.balance = user_data.get('balance', 1000)
+        self.purchased_movies = user_data.get('purchased_movies', [])
+    
+    def can_purchase(self, movie_id):
+        return movie_id not in self.purchased_movies
+
+class MovieManager:
+    def __init__(self, movies_data):
+        self.movies = movies_data
+    
+    def get_all_movies(self):
+        return self.movies
+    
+    def get_movie_by_id(self, movie_id):
+        for movie in self.movies:
+            if movie['id'] == movie_id:
+                return movie
+        return None
+    
+    def search_movies(self, query):
+        query = query.lower()
+        return [m for m in self.movies if 
+                query in m['title'].lower() or 
+                query in m['director'].lower() or
+                any(query in g.lower() for g in m['genre'])]
+
+class UserManager:
+    def __init__(self, users_data):
+        self.users_data = users_data
+    
+    def find_user_by_name(self, name):
+        for user_data in self.users_data:
+            if user_data['name'].lower() == name.lower():
+                return User(user_data)
+        return None
+    
+    def is_valid_email(self, email):
+        return '@' in email and '.' in email.split('@')[-1]
+    
+    def create_user(self, name, email):
+        new_id = max([u['id'] for u in self.users_data]) + 1 if self.users_data else 1
+        new_user = {'id': new_id, 'name': name, 'email': email, 'balance': 1000, 'purchased_movies': []}
+        self.users_data.append(new_user)
+        return User(new_user)
+    
+    def update_user_balance(self, user, amount):
+        for u in self.users_data:
+            if u['id'] == user.id:
+                u['balance'] = user.balance = amount
+                break
+    
+    def add_purchased_movie(self, user, movie_id):
+        for u in self.users_data:
+            if u['id'] == user.id:
+                u['purchased_movies'].append(movie_id)
+                break
+
+class CinemaApp:
+    def __init__(self, data_file="cinema_data.json"):
+        self.data_file = data_file
+        self.data = self.load_data()
+        self.movie_manager = MovieManager(self.data['movies'])
+        self.user_manager = UserManager(self.data['users'])
+        self.current_user = None
+    
+    def load_data(self):
+        try:
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {'movies': [], 'users': []}
+    
+    def save_data(self):
+        try:
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except:
+            pass
+    
+    def clear_screen(self):
+        os.system('cls' if os.name == 'nt' else 'clear')
+    
+    def show_header(self, title):
+        print("=" * 50)
+        print(title)
+        print("=" * 50)
+    
+    def purchase_movie(self, movie):
+        if not self.current_user.can_purchase(movie['id']):
+            return "Вы уже купили этот фильм"
+        
+        if self.current_user.balance < movie['price']:
+            return "Недостаточно средств"
+        
+        self.user_manager.update_user_balance(self.current_user, self.current_user.balance - movie['price'])
+        self.user_manager.add_purchased_movie(self.current_user, movie['id'])
+        self.save_data()
+        return f"Фильм '{movie['title']}' куплен за {movie['price']} руб.!"
+    
+    def run(self):
+        while True:
+            self.clear_screen()
+            self.show_header("ОНЛАЙН-КИНОТЕАТР")
+            print("1. Войти\n2. Зарегистрироваться\n3. Выйти")
+            choice = input("Выберите: ")
+            
+            if choice == "1": self.login()
+            elif choice == "2": self.register()
+            elif choice == "3": break
+    
+    def login(self):
+        self.clear_screen()
+        self.show_header("ВХОД")
+        name = input("Ваше имя: ")
+        user = self.user_manager.find_user_by_name(name)
+        
+        if user:
+            self.current_user = user
+            print(f"Привет, {user.name}! Баланс: {user.balance} руб.")
+            input("Enter...")
+            self.user_menu()
+        else:
+            print("Пользователь не найден!")
+            input("Enter...")
+    
+    def register(self):
+        self.clear_screen()
+        self.show_header("РЕГИСТРАЦИЯ")
+        name = input("Имя: ")
+        email = input("Email: ")
+        
+        if not name or not self.user_manager.is_valid_email(email):
+            print("Ошибка в данных!")
+            input("Enter...")
+            return
+        
+        self.current_user = self.user_manager.create_user(name, email)
+        self.save_data()
+        print("Успешно! Баланс: 1000 руб.")
+        input("Enter...")
+        self.user_menu()
+    
+    def user_menu(self):
+        while True:
+            self.clear_screen()
+            print(f"Пользователь: {self.current_user.name} | Баланс: {self.current_user.balance} руб.")
+            print("=" * 40)
+            print("1. Все фильмы\n2. Поиск\n3. Мои фильмы\n4. Выйти")
+            choice = input("Выберите: ")
+            
+            if choice == "1": self.show_all_movies()
+            elif choice == "2": self.search_movies()
+            elif choice == "3": self.show_my_movies()
+            elif choice == "4": break
+    
+    def show_all_movies(self):
+        movies = self.movie_manager.get_all_movies()
+        while True:
+            self.clear_screen()
+            print("ВСЕ ФИЛЬМЫ")
+            print("=" * 40)
+            
+            for i, movie in enumerate(movies, 1):
+                status = " [Куплен]" if movie['id'] in self.current_user.purchased_movies else ""
+                print(f"{i}. {movie['title']} - {movie['price']} руб.{status}")
+            
+            print("0. Назад")
+            choice = input("Выберите фильм: ")
+            
+            if choice == "0": break
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(movies):
+                    self.show_movie_details(movies[idx])
+    
+    def show_movie_details(self, movie):
+        while True:
+            self.clear_screen()
+            print(f"{movie['title']} ({movie['year']})")
+            print("=" * 40)
+            print(f"Рейтинг: {movie['rating']}/10")
+            print(f"Жанр: {', '.join(movie['genre'])}")
+            print(f"Режиссер: {movie['director']}")
+            print(f"Цена: {movie['price']} руб.")
+            print(f"Описание: {movie['description']}")
+            
+            print("Актеры:")
+            for actor in movie['actors']:
+                print(f"  - {actor['name']} - {actor['role']}")
+            print("=" * 40)
+            
+            if movie['id'] in self.current_user.purchased_movies:
+                print("У вас уже есть этот фильм!")
+                input("Enter...")
+                break
+            else:
+                print("1. Купить\n2. Назад")
+                choice = input("Выберите: ")
+                
+                if choice == "1":
+                    result = self.purchase_movie(movie)
+                    print(result)
+                    input("Enter...")
+                    break
+                elif choice == "2": break
+    
+    def search_movies(self):
+        self.clear_screen()
+        print("ПОИСК ФИЛЬМОВ")
+        query = input("Название, режиссер или жанр: ")
+        
+        results = self.movie_manager.search_movies(query)
+        if not results:
+            print("Ничего не найдено!")
+            input("Enter...")
+            return
+        
+        print(f"Найдено {len(results)} фильмов:")
+        for i, movie in enumerate(results, 1):
+            print(f"{i}. {movie['title']} - {movie['price']} руб.")
+        
+        choice = input("Выберите фильм (0 - назад): ")
+        if choice != "0" and choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(results):
+                self.show_movie_details(results[idx])
+    
+    def show_my_movies(self):
+        self.clear_screen()
+        print("МОИ ФИЛЬМЫ")
+        print("=" * 40)
+        
+        my_movies = [self.movie_manager.get_movie_by_id(mid) for mid in self.current_user.purchased_movies]
+        my_movies = [m for m in my_movies if m]
+        
+        if not my_movies:
+            print("У вас нет фильмов")
+        else:
+            for i, movie in enumerate(my_movies, 1):
+                print(f"{i}. {movie['title']} ({movie['year']})")
+        
+        input("Enter...")
+
+if __name__ == "__main__":
+    CinemaApp().run()
